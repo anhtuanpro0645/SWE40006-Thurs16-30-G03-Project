@@ -1,0 +1,7 @@
+# Store text files with LF line endings in the repository so shell scripts,
+# Dockerfiles and YAML behave the same on Windows, macOS and the Linux servers.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.docx binary
+*.pdf binary

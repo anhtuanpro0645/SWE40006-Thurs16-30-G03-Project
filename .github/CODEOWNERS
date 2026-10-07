@@ -1,0 +1,22 @@
+# Code owners are requested automatically as reviewers on pull requests.
+# Later rules take precedence over earlier ones.
+
+# Default: team lead reviews anything not matched below
+*                       @anhtuanpro0645
+
+# Application code (Minh)
+/backend/               @hmnguyen2805
+/frontend/              @hmnguyen2805
+docker-compose.yml      @hmnguyen2805
+
+# Tests (Vinh)
+/backend/tests/         @meomoc207
+/frontend/tests/        @meomoc207
+/tests/                 @meomoc207
+
+# Infrastructure and monitoring (Duc)
+/deploy/                @HuuMinhDucTran
+/monitoring/            @HuuMinhDucTran
+
+# CI/CD pipeline (Tuan)
+/.github/               @anhtuanpro0645
