@@ -1,0 +1,43 @@
+name: Task
+description: A piece of work for the project board
+title: "[Area] Short description"
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - App (Minh)
+        - Testing (Vinh)
+        - Infra and monitoring (Duc)
+        - CI/CD (Tuan)
+        - Team
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What needs to be done and why.
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: How we know this task is finished.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence to capture (for the final report)
+      description: Screenshots, logs or outputs to save in the evidence folder.

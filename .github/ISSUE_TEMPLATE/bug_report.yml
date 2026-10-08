@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in the app or the pipeline is not working
+title: "[Bug] Short description"
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where does it happen?
+      options:
+        - Local development
+        - CI (GitHub Actions)
+        - Staging
+        - Production
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected and what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1. 
+        2. 
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste error output or a link to the failed workflow run. Never paste passwords, keys or tokens.
+      render: shell
