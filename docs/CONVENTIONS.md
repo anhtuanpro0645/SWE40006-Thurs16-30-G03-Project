@@ -9,6 +9,8 @@ things silently in your own code.
 | Tool | Version |
 |---|---|
 | Node.js | 22 LTS (`node:22-alpine` in Docker, `node-version: 22` in GitHub Actions) |
+| Express | 5 |
+| Vue | 3, built with Vite |
 | PostgreSQL | 17 (`postgres:17-alpine`) |
 | Package manager | npm, with `package-lock.json` committed. CI uses `npm ci` |
 
@@ -17,7 +19,7 @@ things silently in your own code.
 ```
 backend/
   src/                 Express app (app.js exports the app, server.js calls listen)
-  db/init.sql          Creates the links and clicks tables
+  db/init.sql          Creates the links and clicks tables (IF NOT EXISTS, run by the API on start)
   tests/unit/          Vitest unit tests (Vinh)
   tests/integration/   Supertest + PostgreSQL tests (Vinh)
   Dockerfile
@@ -35,6 +37,11 @@ docker-compose.yml     Local development (Minh)
 `app.js` must export the Express app **without** calling `listen()`, so Supertest can
 import it in tests. `server.js` imports the app and starts the server.
 
+**Database schema.** PostgreSQL only runs scripts in `docker-entrypoint-initdb.d` on an
+empty volume, so we do not rely on that. The API runs `db/init.sql` every time it starts.
+Every statement must be safe to repeat (`CREATE TABLE IF NOT EXISTS`,
+`CREATE INDEX IF NOT EXISTS`). Never put `DROP` or destructive changes in this file.
+
 ## 3. npm scripts
 
 CI calls these names exactly. Every `package.json` must provide the ones listed for it.
@@ -45,7 +52,7 @@ CI calls these names exactly. Every `package.json` must provide the ones listed 
 | `npm start` | ✔ | – | Start the API (`node src/server.js`) |
 | `npm run build` | – | ✔ | Build the Vue app with Vite |
 | `npm run lint` | ✔ | ✔ | ESLint, fails on errors |
-| `npm test` | ✔ | ✔ | Unit tests only, no database needed |
+| `npm test` | ✔ | ✔ | Unit tests only, no database needed (`--passWithNoTests` until tests exist) |
 | `npm run test:coverage` | ✔ | – | Unit tests with coverage, fails below the threshold |
 | `npm run test:integration` | ✔ | – | Integration tests, needs `DATABASE_URL` |
 
@@ -65,9 +72,18 @@ Coverage threshold: **70% in Week 9, 80% from Week 10** (set in `vitest.config.j
 | node_exporter | 9100 | not public |
 | cAdvisor | 8080 | not public |
 
-Nginx forwards `/api/*`, `/health` and every single-segment path (`/:code`, for
-redirects) to the API. `/metrics` is **not** forwarded publicly; Prometheus scrapes
-the API directly on the internal Docker network.
+Nginx routing:
+
+| Path | Goes to |
+|---|---|
+| `/api/*`, `/health` | API |
+| Single segment with no dot, matching `^/[A-Za-z0-9_-]+$` (short codes) | API, for redirects |
+| `/metrics` | Blocked (404). Prometheus scrapes the API directly on the internal Docker network |
+| Everything else (`/favicon.svg`, `/assets/*`, ...) | Static files, falling back to `index.html` |
+
+Nginx must pass `X-Forwarded-For` and `X-Real-IP` to the API, and Express sets
+`trust proxy` to `1`. Otherwise every visitor looks like the Nginx container's IP and the
+rate limit is shared by everyone.
 
 ## 5. Environment variables
 
@@ -93,7 +109,7 @@ Real values live in `.env` (never committed) and GitHub Secrets. Commit `.env.ex
 | POST | `/api/links` | `201 { "code": "aB3x9Kq", "shortUrl": "...", "originalUrl": "..." }`, `400` invalid URL, `429` rate limited |
 | GET | `/:code` | `302` redirect, `404` unknown code |
 | GET | `/api/links/:code/stats` | `200 { "code", "totalClicks", "clicksPerDay": [...], "topReferrers": [...] }` |
-| GET | `/health` | `200 { "status": "ok", "db": "ok", "version": "<GIT_SHA>" }`, `503` if the database is unreachable |
+| GET | `/health` | `200 { "status": "ok", "db": "ok", "version": "<GIT_SHA>" }`, or `503 { "status": "error", "db": "down", "version": "<GIT_SHA>" }` if the database is unreachable |
 | GET | `/metrics` | Prometheus text format (internal only) |
 
 Errors always use `{ "error": "<message>" }`.
