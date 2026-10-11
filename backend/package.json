@@ -13,7 +13,7 @@
     "start": "node src/server.js",
     "lint": "eslint .",
     "test": "vitest run tests/unit --passWithNoTests",
-    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "test:coverage": "vitest run tests/unit --coverage --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests"
   },
   "dependencies": {
