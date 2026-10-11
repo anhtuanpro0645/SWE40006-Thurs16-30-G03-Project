@@ -10,6 +10,12 @@ const config = {
   baseUrl: (env.BASE_URL || 'http://localhost:8080').replace(/\/+$/, ''),
   gitSha: env.GIT_SHA || 'dev',
   buildTime: env.BUILD_TIME || '',
+  ipHashSalt: env.IP_HASH_SALT || 'local-dev-salt',
+  rateLimitPerMinute: Number(env.RATE_LIMIT_PER_MINUTE) || 20,
 };
+
+if (config.nodeEnv === 'production' && !env.IP_HASH_SALT) {
+  console.warn('IP_HASH_SALT is not set. Set a long random value on Staging and Production.');
+}
 
 export default config;

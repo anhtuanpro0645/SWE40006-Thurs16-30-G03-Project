@@ -2,6 +2,8 @@ import express from 'express';
 import helmet from 'helmet';
 import config from './config.js';
 import { isDatabaseUp } from './db.js';
+import linksRouter from './routes/links.js';
+import redirectRouter from './routes/redirect.js';
 
 // Builds the Express app. It does not call listen(), so tests can import it
 // with Supertest. server.js is the file that starts the server.
@@ -25,6 +27,12 @@ app.get('/health', async (req, res) => {
     version: config.gitSha,
   });
 });
+
+app.use('/api/links', linksRouter);
+
+// Must stay after every other single-segment route (/health, later /metrics),
+// because /:code matches any single path segment.
+app.use(redirectRouter);
 
 // Unknown routes
 app.use((req, res) => {
