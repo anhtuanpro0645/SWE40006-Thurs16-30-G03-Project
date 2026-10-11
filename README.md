@@ -50,4 +50,35 @@ Direct pushes to `main` are blocked by a repository ruleset.
 
 ## Running locally
 
-Instructions will be added once the app skeleton is merged (issue #2).
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop/) (on Windows, virtualisation must be
+enabled in the BIOS and WSL 2 installed).
+
+```bash
+docker compose up --build
+```
+
+This starts three containers:
+
+| Container | What it runs | Address |
+|---|---|---|
+| `web` | Nginx serving the Vue app, proxying API calls | http://localhost:8080 |
+| `api` | Express API (Node.js 22) | only reachable through `web` |
+| `db` | PostgreSQL 17, data kept in the `pgdata` volume | not exposed |
+
+Check it works:
+
+- Open http://localhost:8080. The page should say "API and database are up".
+- Open http://localhost:8080/health. It should return `{"status":"ok","db":"ok","version":"dev"}`.
+
+No `.env` file is needed for local use. To change the defaults, copy `.env.example` to `.env` and edit it.
+
+Useful commands:
+
+```bash
+docker compose ps              # container status and health
+docker compose logs -f api     # follow the API logs
+docker compose down            # stop (keeps the database)
+docker compose down -v         # stop and delete the database volume
+```
+
+To run the API or front end without Docker, see `backend/README.md` and `frontend/README.md`.
