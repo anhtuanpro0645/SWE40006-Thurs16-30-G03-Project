@@ -9,6 +9,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY src ./src
+COPY db ./db
 
 # Set by CI so /health can report which commit is running
 ARG GIT_SHA=dev
