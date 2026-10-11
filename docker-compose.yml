@@ -1,0 +1,58 @@
+# Local development: web (Nginx + Vue), api (Express) and db (PostgreSQL).
+#   docker compose up --build
+# Then open http://localhost:8080
+#
+# Works without a .env file (safe local defaults). Copy .env.example to .env
+# to override them. Staging and Production use deploy/docker-compose.prod.yml.
+
+name: swe40006-g03
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-urlshortener}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+        BUILD_TIME: ${BUILD_TIME:-}
+    environment:
+      PORT: 3000
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-urlshortener}
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
+      IP_HASH_SALT: ${IP_HASH_SALT:-local-dev-salt}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-20}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+        BUILD_TIME: ${BUILD_TIME:-}
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
