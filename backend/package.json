@@ -13,7 +13,7 @@
     "start": "node src/server.js",
     "lint": "eslint .",
     "test": "vitest run tests/unit --passWithNoTests",
-    "test:coverage": "vitest run tests/unit --coverage --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
     "test:integration": "vitest run tests/integration --passWithNoTests"
   },
   "dependencies": {
@@ -28,6 +28,7 @@
     "@vitest/coverage-v8": "^5.0.3",
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
+    "supertest": "^7.3.1",
     "vitest": "^5.0.3"
   }
 }
