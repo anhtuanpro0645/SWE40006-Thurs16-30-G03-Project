@@ -1,10 +1,19 @@
-# CI for every pull request and every push to main (issue #6).
+# CI for every pull request and every push to main (issues #6 and #7).
 #
-# Backend:  install, lint, unit tests with the coverage gate (threshold in backend/vitest.config.js)
-# Frontend: install, lint, unit tests, production build
+#   backend ─┐
+#            ├─> images (api, web) ─> build
+#   frontend ┘
 #
-# The job is called "build" because the protect-main ruleset requires a status
-# check with that name. Renaming the job means updating the ruleset too.
+# backend:  install, lint, unit tests with the coverage gate (threshold in backend/vitest.config.js)
+# frontend: install, lint, unit tests, production build
+# images:   build each Docker image once, tag it with the full commit SHA, scan it with
+#           Trivy (fails on fixable CRITICAL vulnerabilities) and, on main only, push the
+#           exact image that was scanned to GHCR
+# build:    final gate. The protect-main ruleset requires a check called "build", so this
+#           job only passes when every job above passed. Keep its name if you rename others.
+#
+# Actions are pinned to full commit SHAs (the tag is in the comment next to each one),
+# so a moved or compromised tag cannot change what runs here.
 
 name: CI
 
@@ -13,7 +22,7 @@ on:
   push:
     branches: [main]
 
-# Read-only token. Later jobs that push images (#7) ask for more themselves.
+# Read-only token by default. The images job asks for packages: write itself.
 permissions:
   contents: read
 
@@ -24,41 +33,38 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build:
-    name: build
+  backend:
+    name: backend
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
 
     steps:
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js 22 with npm cache
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: backend/package-lock.json
 
-      # ---------- Backend ----------
-      - name: "Backend: install dependencies"
-        working-directory: backend
+      - name: Install dependencies
         run: npm ci
 
-      - name: "Backend: lint"
-        working-directory: backend
+      - name: Lint
         run: npm run lint
 
-      - name: "Backend: unit tests and coverage gate"
-        working-directory: backend
+      - name: Unit tests and coverage gate
         run: npm run test:coverage
 
-      - name: "Backend: coverage summary"
+      - name: Coverage summary
         if: ${{ !cancelled() && hashFiles('backend/coverage/coverage-summary.json') != '' }}
-        working-directory: backend
         run: |
+          # shellcheck disable=SC2016 # the backticks are a JavaScript template literal, not shell
           node -e '
             const total = require("./coverage/coverage-summary.json").total;
             const rows = ["lines", "statements", "functions", "branches"]
@@ -66,27 +72,162 @@ jobs:
             console.log(["### Backend unit test coverage", "", "| Metric | Coverage | Covered |", "|---|---|---|", ...rows].join("\n"));
           ' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: "Backend: upload coverage report"
+      - name: Upload coverage report
         if: ${{ !cancelled() && hashFiles('backend/coverage/**') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: backend-coverage
           path: backend/coverage/
           retention-days: 14
 
-      # ---------- Frontend ----------
-      - name: "Frontend: install dependencies"
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
         working-directory: frontend
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js 22 with npm cache
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
         run: npm ci
 
-      - name: "Frontend: lint"
-        working-directory: frontend
+      - name: Lint
         run: npm run lint
 
-      - name: "Frontend: unit tests"
-        working-directory: frontend
-        run: npm test
+      # --reporter=default skips the empty "Vitest Test Report" in the run summary
+      # until the front end has tests of its own
+      - name: Unit tests
+        run: npm test -- --reporter=default
 
-      - name: "Frontend: production build"
-        working-directory: frontend
+      - name: Production build
         run: npm run build
+
+  images:
+    name: image (${{ matrix.service }})
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # push to GHCR (only used on main)
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: api
+            context: backend
+          - service: web
+            context: frontend
+
+    env:
+      # Names agreed in docs/CONVENTIONS.md. The full commit SHA is the only tag.
+      IMAGE: ghcr.io/anhtuanpro0645/swe40006-${{ matrix.service }}
+      PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Record the build time
+        run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Built once and loaded into the local Docker engine, so the scan below and the
+      # push after it use exactly the same image
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            BUILD_TIME=${{ env.BUILD_TIME }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ env.BUILD_TIME }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      # Fails the job on CRITICAL vulnerabilities that have a fix available.
+      # Unfixed ones are reported by Trivy but cannot be acted on, so they do not block.
+      - name: Scan the image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          output: trivy-${{ matrix.service }}.txt
+
+      - name: Trivy report
+        if: ${{ !cancelled() && hashFiles(format('trivy-{0}.txt', matrix.service)) != '' }}
+        run: |
+          cat "trivy-${{ matrix.service }}.txt"
+          {
+            echo "### Trivy scan: ${{ matrix.service }} (CRITICAL, fixable)"
+            echo
+            if [ -s "trivy-${{ matrix.service }}.txt" ]; then
+              echo '```'
+              cat "trivy-${{ matrix.service }}.txt"
+              echo '```'
+            else
+              echo "No CRITICAL vulnerabilities with a fix available."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to GHCR
+        if: ${{ env.PUSH == 'true' }}
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the scanned image
+        if: ${{ env.PUSH == 'true' }}
+        run: |
+          docker push "$IMAGE:$GITHUB_SHA"
+          echo "Pushed \`$IMAGE:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build
+    needs: [backend, frontend, images]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check that every job passed
+        env:
+          BACKEND: ${{ needs.backend.result }}
+          FRONTEND: ${{ needs.frontend.result }}
+          IMAGES: ${{ needs.images.result }}
+        run: |
+          echo "backend:  $BACKEND"
+          echo "frontend: $FRONTEND"
+          echo "images:   $IMAGES"
+          for result in "$BACKEND" "$FRONTEND" "$IMAGES"; do
+            if [ "$result" != "success" ]; then
+              echo "::error::At least one CI job did not succeed"
+              exit 1
+            fi
+          done
