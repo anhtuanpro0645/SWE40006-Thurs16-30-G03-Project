@@ -52,13 +52,20 @@ CI calls these names exactly. Every `package.json` must provide the ones listed 
 | `npm start` | ✔ | – | Start the API (`node src/server.js`) |
 | `npm run build` | – | ✔ | Build the Vue app with Vite |
 | `npm run lint` | ✔ | ✔ | ESLint, fails on errors |
-| `npm test` | ✔ | ✔ | Unit tests only, no database needed (`--passWithNoTests` until tests exist) |
+| `npm test` | ✔ | ✔ | Unit tests only, no database needed. Backend fails if no tests are found; frontend uses `--passWithNoTests` until it has tests |
 | `npm run test:coverage` | ✔ | – | Unit tests with coverage, fails below the threshold |
-| `npm run test:integration` | ✔ | – | Integration tests, needs `DATABASE_URL` |
+| `npm run test:integration` | ✔ | – | Integration tests, needs `DATABASE_URL` (`--passWithNoTests` until #10) |
 
 End-to-end tests: `npx playwright test` inside `tests/e2e/`, using `BASE_URL`.
 
-Coverage threshold: **70% in Week 9, 80% from Week 10** (set in `vitest.config.js`).
+Coverage threshold: **80%** for lines, statements, functions and branches (set in
+`backend/vitest.config.js`). It was planned as 70% for Week 9, but unit coverage was
+already 98% when the tests landed (#21), so 80% applies from the start. New backend
+code must come with unit tests, or CI fails when coverage drops below 80%.
+
+CI (`.github/workflows/ci.yml`, job `build`) runs on every pull request and every push
+to `main`: backend `npm ci`, `lint`, `test:coverage`; frontend `npm ci`, `lint`, `test`,
+`build`. The coverage report is attached to each run as the `backend-coverage` artifact.
 
 ## 4. Ports
 
