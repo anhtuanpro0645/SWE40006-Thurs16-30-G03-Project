@@ -1,11 +1,92 @@
+# CI for every pull request and every push to main (issue #6).
+#
+# Backend:  install, lint, unit tests with the coverage gate (threshold in backend/vitest.config.js)
+# Frontend: install, lint, unit tests, production build
+#
+# The job is called "build" because the protect-main ruleset requires a status
+# check with that name. Renaming the job means updating the ruleset too.
+
 name: CI
+
 on:
   pull_request:
   push:
     branches: [main]
+
+# Read-only token. Later jobs that push images (#7) ask for more themselves.
+permissions:
+  contents: read
+
+# A new push to the same pull request cancels the run that is still going.
+# Runs on main are never cancelled, so every merge gets a full result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
+    name: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
-      - uses: actions/checkout@v4
-      - run: echo "Placeholder - real pipeline comes later"
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22 with npm cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      # ---------- Backend ----------
+      - name: "Backend: install dependencies"
+        working-directory: backend
+        run: npm ci
+
+      - name: "Backend: lint"
+        working-directory: backend
+        run: npm run lint
+
+      - name: "Backend: unit tests and coverage gate"
+        working-directory: backend
+        run: npm run test:coverage
+
+      - name: "Backend: coverage summary"
+        if: ${{ !cancelled() && hashFiles('backend/coverage/coverage-summary.json') != '' }}
+        working-directory: backend
+        run: |
+          node -e '
+            const total = require("./coverage/coverage-summary.json").total;
+            const rows = ["lines", "statements", "functions", "branches"]
+              .map((key) => `| ${key} | ${total[key].pct}% | ${total[key].covered}/${total[key].total} |`);
+            console.log(["### Backend unit test coverage", "", "| Metric | Coverage | Covered |", "|---|---|---|", ...rows].join("\n"));
+          ' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Backend: upload coverage report"
+        if: ${{ !cancelled() && hashFiles('backend/coverage/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage/
+          retention-days: 14
+
+      # ---------- Frontend ----------
+      - name: "Frontend: install dependencies"
+        working-directory: frontend
+        run: npm ci
+
+      - name: "Frontend: lint"
+        working-directory: frontend
+        run: npm run lint
+
+      - name: "Frontend: unit tests"
+        working-directory: frontend
+        run: npm test
+
+      - name: "Frontend: production build"
+        working-directory: frontend
+        run: npm run build
