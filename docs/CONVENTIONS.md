@@ -63,9 +63,14 @@ Coverage threshold: **80%** for lines, statements, functions and branches (set i
 already 98% when the tests landed (#21), so 80% applies from the start. New backend
 code must come with unit tests, or CI fails when coverage drops below 80%.
 
-CI (`.github/workflows/ci.yml`, job `build`) runs on every pull request and every push
-to `main`: backend `npm ci`, `lint`, `test:coverage`; frontend `npm ci`, `lint`, `test`,
-`build`. The coverage report is attached to each run as the `backend-coverage` artifact.
+CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`:
+
+| Job | What it does |
+|---|---|
+| `backend` | `npm ci`, `lint`, `test:coverage`; uploads the `backend-coverage` artifact |
+| `frontend` | `npm ci`, `lint`, `test`, `build` (runs in parallel with `backend`) |
+| `image (api)`, `image (web)` | Builds the image, scans it with Trivy, pushes it to GHCR on `main` only |
+| `build` | Passes only if every job above passed. This is the required check in `protect-main` |
 
 ## 4. Ports
 
@@ -129,6 +134,13 @@ Errors always use `{ "error": "<message>" }`.
 | Web | `ghcr.io/anhtuanpro0645/swe40006-web:<commit-sha>` |
 
 The full commit SHA is the only tag we deploy. `latest` is never used on the servers.
+
+- Each image is built once in CI, scanned with Trivy, and the same image is pushed. Images
+  are only pushed from `main`, so every image in GHCR passed tests and the scan.
+- Trivy fails the build on **CRITICAL** vulnerabilities that have a fix. Unfixed ones are
+  listed in the run summary but do not block.
+- `GIT_SHA` and `BUILD_TIME` are passed as build arguments, so `/health` and the footer
+  show which commit is running.
 
 ## 8. GitHub Secrets
 
