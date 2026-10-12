@@ -12,8 +12,8 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "lint": "eslint .",
-    "test": "vitest run tests/unit --passWithNoTests",
-    "test:coverage": "vitest run tests/unit --coverage --passWithNoTests",
+    "test": "vitest run tests/unit",
+    "test:coverage": "vitest run tests/unit --coverage",
     "test:integration": "vitest run tests/integration --passWithNoTests"
   },
   "dependencies": {
