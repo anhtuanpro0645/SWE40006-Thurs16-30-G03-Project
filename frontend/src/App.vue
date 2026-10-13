@@ -1,5 +1,11 @@
 <script setup>
 import { onMounted, ref } from 'vue';
+import StatsPage from './StatsPage.vue';
+
+// /stats/aB3x9Kq shows the stats page; every other path shows the home page.
+// Nginx serves index.html for /stats/... because it has two path segments.
+const statsMatch = window.location.pathname.match(/^\/stats\/([0-9A-Za-z]{7})\/?$/);
+const statsCode = statsMatch ? statsMatch[1] : null;
 
 const longUrl = ref('');
 const loading = ref(false);
@@ -67,7 +73,13 @@ async function copyShortUrl() {
       </p>
     </header>
 
+    <StatsPage
+      v-if="statsCode"
+      :code="statsCode"
+    />
+
     <form
+      v-else
       class="card shorten-form"
       novalidate
       @submit.prevent="shorten"
@@ -129,6 +141,11 @@ async function copyShortUrl() {
         >
           Goes to {{ result.originalUrl }}
         </p>
+        <a
+          :href="`/stats/${result.code}`"
+          class="stats-link"
+          data-testid="stats-link"
+        >View stats</a>
       </div>
     </form>
 
