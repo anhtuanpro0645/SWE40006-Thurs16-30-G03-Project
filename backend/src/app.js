@@ -5,6 +5,7 @@ import { isDatabaseUp } from './db.js';
 import { metricsHandler, metricsMiddleware } from './metrics.js';
 import linksRouter from './routes/links.js';
 import redirectRouter from './routes/redirect.js';
+import statsRouter from './routes/stats.js';
 
 // Builds the Express app. It does not call listen(), so tests can import it
 // with Supertest. server.js is the file that starts the server.
@@ -39,6 +40,7 @@ app.get('/health', async (req, res) => {
 // router below, otherwise "/metrics" would be treated as a short code.
 app.get('/metrics', metricsHandler);
 app.use('/api/links', linksRouter);
+app.use('/api/links', statsRouter);
 
 // Must stay after every other single-segment route (/health, /metrics),
 // because /:code matches any single path segment.
