@@ -4,7 +4,8 @@
 #            ├─> images (api, web) ─> build
 #   frontend ┘
 #
-# backend:  install, lint, unit tests with the coverage gate (threshold in backend/vitest.config.js)
+# backend:  install, lint, unit tests with the coverage gate (threshold in backend/vitest.config.js),
+#           then integration tests against a postgres:17-alpine service container
 # frontend: install, lint, unit tests, production build
 # images:   build each Docker image once, tag it with the full commit SHA, scan it with
 #           Trivy (fails on fixable CRITICAL vulnerabilities) and, on main only, push the
@@ -41,6 +42,23 @@ jobs:
       run:
         working-directory: backend
 
+    # Real database for the integration tests (issue #10). The values are test-only,
+    # not secrets. The health check makes the job wait until Postgres accepts connections.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: urlshortener
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d urlshortener"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Check out the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +78,11 @@ jobs:
 
       - name: Unit tests and coverage gate
         run: npm run test:coverage
+
+      - name: Integration tests (PostgreSQL service)
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgres://app:app@localhost:5432/urlshortener
 
       - name: Coverage summary
         if: ${{ !cancelled() && hashFiles('backend/coverage/coverage-summary.json') != '' }}
