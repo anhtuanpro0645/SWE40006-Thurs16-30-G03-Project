@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue';
 import StatsPage from './StatsPage.vue';
+import VersionFooter from './VersionFooter.vue';
 
 // /stats/aB3x9Kq shows the stats page; every other path shows the home page.
 // Nginx serves index.html for /stats/... because it has two path segments.
@@ -162,5 +163,6 @@ async function copyShortUrl() {
       <span v-else-if="apiStatus === 'ok'">API and database are up</span>
       <span v-else>API or database is unreachable</span>
     </p>
+    <VersionFooter />
   </main>
 </template>

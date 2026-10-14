@@ -293,3 +293,18 @@ button.secondary:hover:not(:disabled) {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ---------- Version footer ---------- */
+
+.version {
+  margin-top: 32px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.version span:first-child {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
