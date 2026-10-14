@@ -1,16 +1,21 @@
-# CI for every pull request and every push to main (issues #6 and #7).
+# CI for every pull request and every push to main (issues #6, #7 and #11).
 #
 #   backend ─┐
-#            ├─> images (api, web) ─> build
-#   frontend ┘
+#            ├─> images (api, web) ─┐
+#   frontend ┘                      ├─> build ─> deploy (staging)   [push to main only]
+#   deploy scripts ─────────────────┘
 #
 # backend:  install, lint, unit tests with the coverage gate (threshold in backend/vitest.config.js)
 # frontend: install, lint, unit tests, production build
 # images:   build each Docker image once, tag it with the full commit SHA, scan it with
 #           Trivy (fails on fixable CRITICAL vulnerabilities) and, on main only, push the
 #           exact image that was scanned to GHCR
+# deploy scripts: shellcheck and tests for deploy/deploy.sh, so a broken deploy script
+#           is caught in the pull request instead of on the server
 # build:    final gate. The protect-main ruleset requires a check called "build", so this
 #           job only passes when every job above passed. Keep its name if you rename others.
+# deploy (staging): after every merge, runs deploy/deploy.sh on Staging over SSH with the
+#           commit SHA, then checks that /health reports that SHA
 #
 # Actions are pinned to full commit SHAs (the tag is in the comment next to each one),
 # so a moved or compromised tag cannot change what runs here.
@@ -208,9 +213,24 @@ jobs:
           docker push "$IMAGE:$GITHUB_SHA"
           echo "Pushed \`$IMAGE:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
 
+  deploy-scripts:
+    name: deploy scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Shellcheck
+        run: shellcheck deploy/deploy.sh deploy/tests/deploy.test.sh
+
+      - name: Test deploy.sh
+        run: bash deploy/tests/deploy.test.sh
+
   build:
     name: build
-    needs: [backend, frontend, images]
+    needs: [backend, frontend, images, deploy-scripts]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -221,13 +241,110 @@ jobs:
           BACKEND: ${{ needs.backend.result }}
           FRONTEND: ${{ needs.frontend.result }}
           IMAGES: ${{ needs.images.result }}
+          DEPLOY_SCRIPTS: ${{ needs.deploy-scripts.result }}
         run: |
-          echo "backend:  $BACKEND"
-          echo "frontend: $FRONTEND"
-          echo "images:   $IMAGES"
-          for result in "$BACKEND" "$FRONTEND" "$IMAGES"; do
+          echo "backend:        $BACKEND"
+          echo "frontend:       $FRONTEND"
+          echo "images:         $IMAGES"
+          echo "deploy scripts: $DEPLOY_SCRIPTS"
+          for result in "$BACKEND" "$FRONTEND" "$IMAGES" "$DEPLOY_SCRIPTS"; do
             if [ "$result" != "success" ]; then
               echo "::error::At least one CI job did not succeed"
               exit 1
             fi
           done
+
+  deploy-staging:
+    name: deploy (staging)
+    needs: build
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Secrets come from the "staging" environment, which only main can deploy to
+    environment: staging
+    # Never two deployments to the same server at once; a newer one waits its turn
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+
+    env:
+      APP_DIR: /home/deploy/app
+      SMOKE_TEST_ATTEMPTS: 12
+      SMOKE_TEST_DELAY_SECONDS: 5
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Host key checking stays on: the runner only trusts the host key stored in
+      # STAGING_KNOWN_HOSTS, so a different machine on that IP is refused.
+      # tr -d '\r' removes Windows line endings a pasted secret may contain.
+      - name: Set up SSH
+        env:
+          SSH_HOST: ${{ secrets.STAGING_HOST }}
+          SSH_USER: ${{ secrets.STAGING_USER }}
+          SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^$/d' > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host server
+            HostName $(printf '%s' "$SSH_HOST" | tr -d '\r[:space:]')
+            User $(printf '%s' "$SSH_USER" | tr -d '\r[:space:]')
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            BatchMode yes
+            ConnectTimeout 15
+            ServerAliveInterval 15
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Copy the compose file and deploy script
+        run: |
+          # shellcheck disable=SC2029 # APP_DIR is meant to expand on the runner
+          ssh server "mkdir -p '$APP_DIR'"
+          scp deploy/docker-compose.prod.yml deploy/deploy.sh "server:$APP_DIR/"
+          # Commits made on Windows lose the executable bit, so set it on the server
+          # shellcheck disable=SC2029 # APP_DIR is meant to expand on the runner
+          ssh server "chmod 755 '$APP_DIR/deploy.sh'"
+
+      - name: Deploy ${{ github.sha }}
+        run: |
+          # shellcheck disable=SC2029 # APP_DIR and the SHA are meant to expand on the runner
+          ssh server "bash '$APP_DIR/deploy.sh' '$GITHUB_SHA'"
+
+      # Fails the job unless /health answers 200 with the SHA that was just deployed
+      - name: Smoke test /health
+        env:
+          SSH_HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          url="http://$(printf '%s' "$SSH_HOST" | tr -d '\r[:space:]')/health"
+          for attempt in $(seq 1 "$SMOKE_TEST_ATTEMPTS"); do
+            if body="$(curl --silent --show-error --fail --max-time 5 "$url")"; then
+              version="$(jq -r '.version // empty' <<< "$body")"
+              if [ "$version" = "$GITHUB_SHA" ]; then
+                echo "Attempt $attempt: /health is ok and reports $version"
+                {
+                  echo "### Deployed to Staging"
+                  echo
+                  echo "\`$GITHUB_SHA\` is running and \`/health\` reports the same SHA."
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+              fi
+              echo "Attempt $attempt: /health answered, but reports version '$version'"
+            else
+              echo "Attempt $attempt: /health did not answer with 200"
+            fi
+            sleep "$SMOKE_TEST_DELAY_SECONDS"
+          done
+          echo "::error::Smoke test failed: /health never reported $GITHUB_SHA"
+          exit 1
+
+      - name: Remove the SSH key
+        if: ${{ always() }}
+        run: rm -f ~/.ssh/deploy_key

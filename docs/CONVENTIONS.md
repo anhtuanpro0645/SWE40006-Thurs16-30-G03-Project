@@ -70,7 +70,9 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `ma
 | `backend` | `npm ci`, `lint`, `test:coverage`; uploads the `backend-coverage` artifact |
 | `frontend` | `npm ci`, `lint`, `test`, `build` (runs in parallel with `backend`) |
 | `image (api)`, `image (web)` | Builds the image, scans it with Trivy, pushes it to GHCR on `main` only |
+| `deploy scripts` | `shellcheck` and the tests for `deploy/deploy.sh` (`deploy/tests/deploy.test.sh`) |
 | `build` | Passes only if every job above passed. This is the required check in `protect-main` |
+| `deploy (staging)` | `main` only, after `build`: deploys the commit to Staging and runs the `/health` smoke test |
 
 ## 4. Ports
 
@@ -112,7 +114,7 @@ Real values live in `.env` (never committed) and GitHub Secrets. Commit `.env.ex
 | `RATE_LIMIT_PER_MINUTE` | api | `20` |
 | `GIT_SHA` | api, web (build arg) | full commit SHA, set by CI |
 | `BUILD_TIME` | api, web (build arg) | ISO 8601 time, set by CI |
-| `IMAGE_TAG` | deploy compose | commit SHA of the image to run |
+| `IMAGE_TAG` | deploy compose | full commit SHA of the images to run. Written to `image.env` by `deploy.sh`, never put in `.env` |
 
 ## 6. API endpoints
 
@@ -126,7 +128,7 @@ Real values live in `.env` (never committed) and GitHub Secrets. Commit `.env.ex
 
 Errors always use `{ "error": "<message>" }`.
 
-## 7. Docker images
+## 7. Docker images and deployment
 
 | Image | Name |
 |---|---|
@@ -142,12 +144,43 @@ The full commit SHA is the only tag we deploy. `latest` is never used on the ser
 - `GIT_SHA` and `BUILD_TIME` are passed as build arguments, so `/health` and the footer
   show which commit is running.
 
+**On each server** (Staging and Production), everything lives in `/home/deploy/app`:
+
+| File | Written by | Contents |
+|---|---|---|
+| `docker-compose.prod.yml` | deploy job, every deployment | Copied from `deploy/`. Uses `image:` with `${IMAGE_TAG}`, never `build:` |
+| `deploy.sh` | deploy job, every deployment | Copied from `deploy/`. `./deploy.sh <full SHA>` deploys that commit |
+| `.env` | Duc, once per server, `chmod 600` | `POSTGRES_USER=app`, `POSTGRES_PASSWORD`, `POSTGRES_DB=urlshortener`, `IP_HASH_SALT`, `BASE_URL=http://<server IP>`, `RATE_LIMIT_PER_MINUTE=20`. Password and salt are random hex, different on each server |
+| `image.env` | `deploy.sh` | `IMAGE_TAG=<full SHA>` of the running version |
+| `image.env.previous` | `deploy.sh` | The version that ran before it, for rollback (#13) |
+
+`deploy.sh` pulls both images first and only changes `image.env` if the pull worked, so a
+failed pull never touches the running containers. It then runs `docker compose up --wait`,
+which fails if a container does not become healthy within 180 seconds. A missing value in
+`.env` stops the deployment with an error; nothing falls back to a default secret.
+
+The stack runs on the Docker network `swe40006-app`. Prometheus (#8) joins that network as
+an external network to scrape `api:3000/metrics`.
+
+To check or redeploy by hand on a server:
+
+```bash
+cd /home/deploy/app
+cat image.env                       # which commit is running
+./deploy.sh <full commit SHA>       # deploy a commit whose images are in GHCR
+docker compose --env-file .env --env-file image.env -f docker-compose.prod.yml ps
+```
+
 ## 8. GitHub Secrets
 
 | Secret | Scope | Set by |
 |---|---|---|
-| `STAGING_HOST`, `STAGING_USER`, `STAGING_SSH_KEY` | `staging` environment | Duc gives values, Tuan stores them |
-| `PROD_HOST`, `PROD_USER`, `PROD_SSH_KEY` | `production` environment (required reviewer) | Duc gives values, Tuan stores them |
+| `STAGING_HOST`, `STAGING_USER`, `STAGING_SSH_KEY`, `STAGING_KNOWN_HOSTS` | `staging` environment (`main` only) | Duc gives values, Tuan stores them |
+| `PROD_HOST`, `PROD_USER`, `PROD_SSH_KEY`, `PROD_KNOWN_HOSTS` | `production` environment (`main` only, required reviewer) | Duc gives values, Tuan stores them |
+
+`*_KNOWN_HOSTS` is the server's `ssh-ed25519` host key line (from `ssh-keygen -F <host>`
+after a first login whose fingerprint Duc confirmed). The deploy job keeps strict host
+key checking on, so it refuses to connect if the server's key ever changes.
 
 The database password and `IP_HASH_SALT` live only in the `.env` file on each server.
 Send secrets privately, never in issues, pull requests or group chat screenshots.
