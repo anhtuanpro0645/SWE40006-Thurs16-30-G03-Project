@@ -70,7 +70,7 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `ma
 | `backend` | `npm ci`, `lint`, `test:coverage`, then `test:integration` against a `postgres:17-alpine` service; uploads the `backend-coverage` artifact |
 | `frontend` | `npm ci`, `lint`, `test`, `build` (runs in parallel with `backend`) |
 | `image (api)`, `image (web)` | Builds the image, scans it with Trivy, pushes it to GHCR on `main` only |
-| `deploy scripts` | `shellcheck` and the tests for `deploy/deploy.sh` (`deploy/tests/deploy.test.sh`) |
+| `deploy scripts` | `shellcheck` and the tests for `deploy/deploy.sh` and `deploy/smoke-test.sh` (`deploy/tests/`) |
 | `build` | Passes only if every job above passed. This is the required check in `protect-main` |
 | `deploy (staging)` | `main` only, after `build`: deploys the commit to Staging and runs the `/health` smoke test |
 
@@ -158,6 +158,15 @@ The full commit SHA is the only tag we deploy. `latest` is never used on the ser
 failed pull never touches the running containers. It then runs `docker compose up --wait`,
 which fails if a container does not become healthy within 180 seconds. A missing value in
 `.env` stops the deployment with an error; nothing falls back to a default secret.
+
+If the start fails, `image.env` already holds the new SHA (the containers were being
+replaced) and the version that ran before is in `image.env.previous`. Rollback (#13) redeploys
+that one: `./deploy.sh "$(cut -d= -f2 image.env.previous)"`. Removing old images afterwards
+is best effort: if it fails, `deploy.sh` prints a warning but the deployment still passes.
+
+After `deploy.sh`, the deploy job runs `deploy/smoke-test.sh http://<server> <SHA>` from the
+runner. It passes only when `/health` answers 200 with `version` equal to that SHA (12 tries,
+5 seconds apart). It can be run by hand from any machine with `curl` and `jq`.
 
 The stack runs on the Docker network `swe40006-app`. Prometheus (#8) joins that network as
 an external network to scrape `api:3000/metrics`.

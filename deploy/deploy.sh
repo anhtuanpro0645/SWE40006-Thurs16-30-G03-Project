@@ -58,7 +58,10 @@ main() {
     || { compose image.env ps; fail "containers did not become healthy within ${WAIT_TIMEOUT_SECONDS}s"; }
 
   compose image.env ps
-  docker image prune --all --force --filter "until=$KEEP_UNUSED_IMAGES_FOR" > /dev/null
+  # The new version is already healthy, so a failed cleanup must not fail the deployment
+  if ! docker image prune --all --force --filter "until=$KEEP_UNUSED_IMAGES_FOR" > /dev/null; then
+    echo "deploy: warning: could not remove old images (the deployment itself succeeded)" >&2
+  fi
   echo "deploy: $image_tag is running"
 }
 

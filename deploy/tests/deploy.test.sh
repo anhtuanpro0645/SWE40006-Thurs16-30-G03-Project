@@ -31,6 +31,7 @@ echo "$*" >> "$FAKE_DOCKER_CALLS"
 case " $* " in
   *" pull "*) [[ "${FAKE_PULL_FAILS:-}" == "1" ]] && exit 1 ;;
   *" up "*)   [[ "${FAKE_UP_FAILS:-}" == "1" ]] && exit 1 ;;
+  *" prune "*) [[ "${FAKE_PRUNE_FAILS:-}" == "1" ]] && exit 1 ;;
 esac
 exit 0
 FAKE
@@ -41,11 +42,12 @@ teardown() {
   rm -rf "$WORK_DIR"
 }
 
-# Runs deploy.sh with the fake docker. Set FAKE_PULL_FAILS=1 or FAKE_UP_FAILS=1 first
-# to make that docker step fail.
+# Runs deploy.sh with the fake docker. Set FAKE_PULL_FAILS=1, FAKE_UP_FAILS=1 or
+# FAKE_PRUNE_FAILS=1 first to make that docker step fail.
 run_deploy() {
   PATH="$WORK_DIR/bin:$PATH" FAKE_DOCKER_CALLS="$CALLS" \
     FAKE_PULL_FAILS="${FAKE_PULL_FAILS:-}" FAKE_UP_FAILS="${FAKE_UP_FAILS:-}" \
+    FAKE_PRUNE_FAILS="${FAKE_PRUNE_FAILS:-}" \
     bash "$APP/deploy.sh" "$@" > "$WORK_DIR/out.log" 2>&1
 }
 
@@ -139,6 +141,15 @@ test_unhealthy_start_fails_the_deploy() {
   teardown
 }
 
+test_failed_cleanup_does_not_fail_a_healthy_deploy() {
+  setup
+  FAKE_PRUNE_FAILS=1 check "deploy still succeeds when image prune fails" run_deploy "$SHA_A"
+  check "image.env holds the deployed SHA" file_is "$APP/image.env" "IMAGE_TAG=$SHA_A"
+  check "a warning says the cleanup failed" output_contains "warning: could not remove old images"
+  check "old images are pruned on a normal deploy" calls_contain "image prune"
+  teardown
+}
+
 echo "deploy.sh"
 test_rejects_missing_or_short_sha
 test_fails_without_env_file
@@ -147,6 +158,7 @@ test_second_deploy_keeps_previous_version
 test_redeploying_same_sha_keeps_previous_version
 test_failed_pull_leaves_running_version_alone
 test_unhealthy_start_fails_the_deploy
+test_failed_cleanup_does_not_fail_a_healthy_deploy
 
 echo
 echo "$passed passed, $failed failed"

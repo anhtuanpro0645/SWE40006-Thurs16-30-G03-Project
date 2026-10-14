@@ -11,8 +11,8 @@
 # images:   build each Docker image once, tag it with the full commit SHA, scan it with
 #           Trivy (fails on fixable CRITICAL vulnerabilities) and, on main only, push the
 #           exact image that was scanned to GHCR
-# deploy scripts: shellcheck and tests for deploy/deploy.sh, so a broken deploy script
-#           is caught in the pull request instead of on the server
+# deploy scripts: shellcheck and tests for deploy/deploy.sh and deploy/smoke-test.sh, so a
+#           broken deploy script is caught in the pull request instead of on the server
 # build:    final gate. The protect-main ruleset requires a check called "build", so this
 #           job only passes when every job above passed. Keep its name if you rename others.
 # deploy (staging): after every merge, runs deploy/deploy.sh on Staging over SSH with the
@@ -246,10 +246,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Shellcheck
-        run: shellcheck deploy/deploy.sh deploy/tests/deploy.test.sh
+        run: shellcheck deploy/*.sh deploy/tests/*.sh
 
       - name: Test deploy.sh
         run: bash deploy/tests/deploy.test.sh
+
+      - name: Test smoke-test.sh
+        run: bash deploy/tests/smoke-test.test.sh
 
   build:
     name: build
@@ -292,7 +295,7 @@ jobs:
 
     env:
       APP_DIR: /home/deploy/app
-      SMOKE_TEST_ATTEMPTS: 12
+      SMOKE_TEST_ATTEMPTS: 12 # read by deploy/smoke-test.sh: 12 tries, 5 s apart
       SMOKE_TEST_DELAY_SECONDS: 5
 
     steps:
@@ -346,27 +349,12 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.STAGING_HOST }}
         run: |
-          url="http://$(printf '%s' "$SSH_HOST" | tr -d '\r[:space:]')/health"
-          for attempt in $(seq 1 "$SMOKE_TEST_ATTEMPTS"); do
-            if body="$(curl --silent --show-error --fail --max-time 5 "$url")"; then
-              version="$(jq -r '.version // empty' <<< "$body")"
-              if [ "$version" = "$GITHUB_SHA" ]; then
-                echo "Attempt $attempt: /health is ok and reports $version"
-                {
-                  echo "### Deployed to Staging"
-                  echo
-                  echo "\`$GITHUB_SHA\` is running and \`/health\` reports the same SHA."
-                } >> "$GITHUB_STEP_SUMMARY"
-                exit 0
-              fi
-              echo "Attempt $attempt: /health answered, but reports version '$version'"
-            else
-              echo "Attempt $attempt: /health did not answer with 200"
-            fi
-            sleep "$SMOKE_TEST_DELAY_SECONDS"
-          done
-          echo "::error::Smoke test failed: /health never reported $GITHUB_SHA"
-          exit 1
+          bash deploy/smoke-test.sh "http://$SSH_HOST" "$GITHUB_SHA"
+          {
+            echo "### Deployed to Staging"
+            echo
+            echo "\`$GITHUB_SHA\` is running and \`/health\` reports the same SHA."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the SSH key
         if: ${{ always() }}
