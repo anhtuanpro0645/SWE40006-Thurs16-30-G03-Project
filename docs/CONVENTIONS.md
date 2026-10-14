@@ -54,7 +54,7 @@ CI calls these names exactly. Every `package.json` must provide the ones listed 
 | `npm run lint` | ✔ | ✔ | ESLint, fails on errors |
 | `npm test` | ✔ | ✔ | Unit tests only, no database needed. Backend fails if no tests are found; frontend uses `--passWithNoTests` until it has tests |
 | `npm run test:coverage` | ✔ | – | Unit tests with coverage, fails below the threshold |
-| `npm run test:integration` | ✔ | – | Integration tests, needs `DATABASE_URL` (`--passWithNoTests` until #10) |
+| `npm run test:integration` | ✔ | – | Integration tests against a real PostgreSQL, needs a local `DATABASE_URL` (the tests refuse any other host) |
 
 End-to-end tests: `npx playwright test` inside `tests/e2e/`, using `BASE_URL`.
 
@@ -67,7 +67,7 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `ma
 
 | Job | What it does |
 |---|---|
-| `backend` | `npm ci`, `lint`, `test:coverage`; uploads the `backend-coverage` artifact |
+| `backend` | `npm ci`, `lint`, `test:coverage`, then `test:integration` against a `postgres:17-alpine` service; uploads the `backend-coverage` artifact |
 | `frontend` | `npm ci`, `lint`, `test`, `build` (runs in parallel with `backend`) |
 | `image (api)`, `image (web)` | Builds the image, scans it with Trivy, pushes it to GHCR on `main` only |
 | `deploy scripts` | `shellcheck` and the tests for `deploy/deploy.sh` (`deploy/tests/deploy.test.sh`) |
