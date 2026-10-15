@@ -2,7 +2,7 @@ import express from 'express';
 import helmet from 'helmet';
 import config from './config.js';
 import { isDatabaseUp } from './db.js';
-import { metricsHandler, metricsMiddleware } from './metrics.js';
+import { metricsHandler, metricsMiddleware, rememberMountPath } from './metrics.js';
 import linksRouter from './routes/links.js';
 import redirectRouter from './routes/redirect.js';
 import statsRouter from './routes/stats.js';
@@ -39,8 +39,8 @@ app.get('/health', async (req, res) => {
 // Prometheus metrics, internal only. Must be registered before the redirect
 // router below, otherwise "/metrics" would be treated as a short code.
 app.get('/metrics', metricsHandler);
-app.use('/api/links', linksRouter);
-app.use('/api/links', statsRouter);
+app.use('/api/links', rememberMountPath, linksRouter);
+app.use('/api/links', rememberMountPath, statsRouter);
 
 // Must stay after every other single-segment route (/health, /metrics),
 // because /:code matches any single path segment.

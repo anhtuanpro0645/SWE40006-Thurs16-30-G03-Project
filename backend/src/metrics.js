@@ -24,11 +24,19 @@ const requestDuration = new client.Histogram({
   registers: [register],
 });
 
+// Express resets req.baseUrl when an error leaves a mounted router, which
+// happens before "finish" fires. Put this in front of each mounted router so
+// the mount path (e.g. "/api/links") is remembered for the route label.
+export function rememberMountPath(req, res, next) {
+  res.locals.mountPath = req.baseUrl;
+  next();
+}
+
 // The route pattern, e.g. "/:code" rather than "/aB3x9Kq". Using the real
 // path would create a new time series for every short link.
-export function routeLabel(req) {
+export function routeLabel(req, mountPath = req.baseUrl) {
   if (!req.route) return 'unmatched';
-  const path = `${req.baseUrl}${req.route.path}`;
+  const path = `${mountPath}${req.route.path}`;
   return path.length > 1 ? path.replace(/\/$/, '') : path;
 }
 
@@ -36,7 +44,11 @@ export function routeLabel(req) {
 export function metricsMiddleware(req, res, next) {
   const stopTimer = requestDuration.startTimer();
   res.on('finish', () => {
-    const labels = { method: req.method, route: routeLabel(req), status: String(res.statusCode) };
+    const labels = {
+      method: req.method,
+      route: routeLabel(req, res.locals.mountPath),
+      status: String(res.statusCode),
+    };
     if (labels.route === '/metrics') return; // ignore Prometheus's own scrapes
     stopTimer(labels);
     requestsTotal.inc(labels);

@@ -57,6 +57,20 @@ describe('GET /metrics', () => {
     expect(await scrape()).not.toContain('route="/metrics"');
   });
 
+  it('keeps the full route label when a handler in a mounted router fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    db.query.mockRejectedValue(new Error('database down'));
+    await request(app).get(`/api/links/${CODE}/stats`).expect(500);
+    await request(app).post('/api/links').send({ url: 'https://example.com/' }).expect(500);
+    consoleError.mockRestore();
+
+    const text = await scrape();
+    expect(text).toMatch(/http_requests_total\{method="GET",route="\/api\/links\/:code\/stats",status="500"\}/);
+    expect(text).toMatch(/http_requests_total\{method="POST",route="\/api\/links",status="500"\}/);
+    expect(text).not.toContain('route="/:code/stats"');
+    expect(text).not.toContain('route="/",status="500"');
+  });
+
   it.each(['/METRICS', '/Metrics'])('does not serve metrics at %s', async (path) => {
     db.query.mockResolvedValue({ rows: [] });
     const res = await request(app).get(path);
@@ -72,6 +86,12 @@ describe('routeLabel', () => {
 
   it('joins the router mount path and drops a trailing slash', () => {
     expect(routeLabel({ baseUrl: '/api/links', route: { path: '/' } })).toBe('/api/links');
+  });
+
+  it('uses the remembered mount path when one is given', () => {
+    expect(routeLabel({ baseUrl: '', route: { path: '/:code/stats' } }, '/api/links')).toBe(
+      '/api/links/:code/stats',
+    );
   });
 
   it('keeps the root path as "/"', () => {
