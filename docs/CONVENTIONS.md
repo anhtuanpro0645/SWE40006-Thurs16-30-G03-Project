@@ -70,10 +70,17 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `ma
 | `backend` | `npm ci`, `lint`, `test:coverage`, then `test:integration` against a `postgres:17-alpine` service; uploads the `backend-coverage` artifact |
 | `frontend` | `npm ci`, `lint`, `test`, `build` (runs in parallel with `backend`) |
 | `image (api)`, `image (web)` | Builds the image, scans it with Trivy, pushes it to GHCR on `main` only |
-| `deploy scripts` | `shellcheck` and the tests for `deploy/deploy.sh` and `deploy/smoke-test.sh` (`deploy/tests/`) |
+| `deploy scripts` | `shellcheck` and the tests for the scripts in `deploy/` (`deploy/tests/`) |
 | `build` | Passes only if every job above passed. This is the required check in `protect-main` |
 | `deploy (staging)` | `main` only, after `build`: deploys the commit to Staging and runs the `/health` smoke test |
 | `e2e` | `main` only, after `deploy (staging)`: runs the Playwright tests in `tests/e2e/` against Staging; uploads the `playwright-report` artifact |
+| `deploy (production)` | `main` only, after `e2e`: waits for a reviewer to approve, then deploys the same commit to Production and runs the smoke test |
+
+Both deploy jobs use the composite action `.github/actions/deploy-to-server`
+(`setup-ssh.sh`, copy files, `deploy.sh`, `smoke-test.sh`, remove the key), so Staging and
+Production always go through the same steps. Runs on `main` queue one after another, so
+**a run waiting for Production approval holds the next merges** until it is approved or
+rejected: approve or reject promptly.
 
 ## 4. Ports
 
@@ -181,12 +188,17 @@ cat image.env                       # which commit is running
 docker compose --env-file .env --env-file image.env -f docker-compose.prod.yml ps
 ```
 
-## 8. GitHub Secrets
+## 8. GitHub Secrets and variables
 
 | Secret | Scope | Set by |
 |---|---|---|
-| `STAGING_HOST`, `STAGING_USER`, `STAGING_SSH_KEY`, `STAGING_KNOWN_HOSTS` | `staging` environment (`main` only) | Duc gives values, Tuan stores them |
-| `PROD_HOST`, `PROD_USER`, `PROD_SSH_KEY`, `PROD_KNOWN_HOSTS` | `production` environment (`main` only, required reviewer) | Duc gives values, Tuan stores them |
+| Secrets `STAGING_HOST`, `STAGING_SSH_KEY`, `STAGING_KNOWN_HOSTS` | `staging` environment (`main` only) | Duc gives values, Tuan stores them |
+| Secrets `PROD_HOST`, `PROD_SSH_KEY`, `PROD_KNOWN_HOSTS` | `production` environment (`main` only, required reviewer) | Duc gives values, Tuan stores them |
+| Variables `STAGING_USER`, `PROD_USER` (both `deploy`) | the same environments, under **Variables** | Tuan |
+
+The SSH user is a variable, not a secret: GitHub hides every secret value in the logs, and
+a secret equal to `deploy` turned every "deploy" in the logs (step names, `deploy.sh`) into
+`***`.
 
 `*_KNOWN_HOSTS` is the server's `ssh-ed25519` host key line (from `ssh-keygen -F <host>`
 after a first login whose fingerprint Duc confirmed). The deploy job keeps strict host
