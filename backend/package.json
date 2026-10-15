@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "test": "vitest run tests/unit",
     "test:coverage": "vitest run tests/unit --coverage",
-    "test:integration": "vitest run tests/integration --passWithNoTests"
+    "test:integration": "vitest run tests/integration"
   },
   "dependencies": {
     "express": "^5.3.0",
