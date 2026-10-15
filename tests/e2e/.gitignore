@@ -1,0 +1,3 @@
+# node_modules/ is already ignored by the root .gitignore
+playwright-report/
+test-results/
