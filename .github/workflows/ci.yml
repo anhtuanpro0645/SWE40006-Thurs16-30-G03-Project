@@ -1,8 +1,8 @@
-# CI for every pull request and every push to main (issues #6, #7, #10 and #11).
+# CI for every pull request and every push to main (issues #6, #7, #10, #11 and #12).
 #
 #   backend ─┐
 #            ├─> images (api, web) ─┐
-#   frontend ┘                      ├─> build ─> deploy (staging)   [push to main only]
+#   frontend ┘                      ├─> build ─> deploy (staging) ─> e2e   [push to main only]
 #   deploy scripts ─────────────────┘
 #
 # backend:  install, lint, unit tests with the coverage gate (threshold in backend/vitest.config.js),
@@ -17,6 +17,7 @@
 #           job only passes when every job above passed. Keep its name if you rename others.
 # deploy (staging): after every merge, runs deploy/deploy.sh on Staging over SSH with the
 #           commit SHA, then checks that /health reports that SHA
+# e2e:      runs the Playwright tests in tests/e2e against Staging and uploads the HTML report
 #
 # Actions are pinned to full commit SHAs (the tag is in the comment next to each one),
 # so a moved or compromised tag cannot change what runs here.
@@ -359,3 +360,61 @@ jobs:
       - name: Remove the SSH key
         if: ${{ always() }}
         run: rm -f ~/.ssh/deploy_key
+
+  e2e:
+    name: e2e
+    needs: deploy-staging
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # Playwright installs system dependencies for specific Ubuntu versions, so pin one
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # STAGING_HOST can only be read in the "staging" environment
+    environment: staging
+
+    env:
+      GIT_SHA: ${{ github.sha }}
+
+    defaults:
+      run:
+        working-directory: tests/e2e
+
+    steps:
+      # Same cleaning the deploy job applies to secrets pasted on Windows.
+      # Runs in the workspace root because tests/e2e does not exist before checkout.
+      - name: Set BASE_URL
+        working-directory: .
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          host="$(printf '%s' "$STAGING_HOST" | tr -d '\r[:space:]')"
+          [ -n "$host" ] || { echo "::error::STAGING_HOST secret is empty"; exit 1; }
+          # The cleaned value is masked too, because it can differ from the secret string
+          echo "::add-mask::$host"
+          echo "BASE_URL=http://$host" >> "$GITHUB_ENV"
+
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js 22 with npm cache
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests against Staging
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report/
+          retention-days: 14

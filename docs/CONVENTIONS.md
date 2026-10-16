@@ -73,6 +73,7 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `ma
 | `deploy scripts` | `shellcheck` and the tests for `deploy/deploy.sh` and `deploy/smoke-test.sh` (`deploy/tests/`) |
 | `build` | Passes only if every job above passed. This is the required check in `protect-main` |
 | `deploy (staging)` | `main` only, after `build`: deploys the commit to Staging and runs the `/health` smoke test |
+| `e2e` | `main` only, after `deploy (staging)`: runs the Playwright tests in `tests/e2e/` against Staging; uploads the `playwright-report` artifact |
 
 ## 4. Ports
 
