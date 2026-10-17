@@ -1,6 +1,7 @@
-# Use this only after the app is running on this server.
+# Use this only when the app is running on this server.
 # It lets Prometheus reach api:3000/metrics on the app's internal network.
-# Check the real network name with `docker network ls` and set APP_NETWORK in .env.
+# The network is created by the app's own Compose project (fixed name swe40006-app),
+# so never create it by hand with `docker network create`.
 services:
   prometheus:
     networks:
@@ -10,4 +11,4 @@ services:
 networks:
   app:
     external: true
-    name: ${APP_NETWORK:-app_default}
+    name: swe40006-app

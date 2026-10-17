@@ -1,3 +1,11 @@
+name: swe40006-monitoring
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   prometheus:
     image: prom/prometheus:v2.53.0
@@ -14,6 +22,8 @@ services:
       - "127.0.0.1:9090:9090"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    mem_limit: 512m
+    logging: *default-logging
     networks:
       - monitoring
 
@@ -27,6 +37,7 @@ services:
       - --path.rootfs=/host
     volumes:
       - /:/host:ro,rslave
+    logging: *default-logging
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
@@ -34,6 +45,7 @@ services:
     privileged: true
     command:
       - --docker_only=true
+      - --housekeeping_interval=15s
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
@@ -42,6 +54,8 @@ services:
       - /dev/disk/:/dev/disk:ro
     devices:
       - /dev/kmsg
+    mem_limit: 256m
+    logging: *default-logging
     networks:
       - monitoring
 
@@ -51,12 +65,17 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/dashboards:ro
     ports:
       # host port 3001 as agreed in CONVENTIONS.md, restricted by the security group
       - "3001:3000"
+    mem_limit: 384m
+    logging: *default-logging
     networks:
       - monitoring
 
