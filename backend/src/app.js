@@ -2,8 +2,10 @@ import express from 'express';
 import helmet from 'helmet';
 import config from './config.js';
 import { isDatabaseUp } from './db.js';
+import { metricsHandler, metricsMiddleware, rememberMountPath } from './metrics.js';
 import linksRouter from './routes/links.js';
 import redirectRouter from './routes/redirect.js';
+import statsRouter from './routes/stats.js';
 
 // Builds the Express app. It does not call listen(), so tests can import it
 // with Supertest. server.js is the file that starts the server.
@@ -13,6 +15,12 @@ const app = express();
 // request would appear to come from the Nginx container's IP address.
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+
+// "/METRICS" must not match the /metrics route. Nginx only blocks the exact
+// lower-case path, so a case-insensitive match would make metrics public.
+app.set('case sensitive routing', true);
+
+app.use(metricsMiddleware);
 
 app.use(helmet());
 app.use(express.json({ limit: '10kb' }));
@@ -28,9 +36,13 @@ app.get('/health', async (req, res) => {
   });
 });
 
-app.use('/api/links', linksRouter);
+// Prometheus metrics, internal only. Must be registered before the redirect
+// router below, otherwise "/metrics" would be treated as a short code.
+app.get('/metrics', metricsHandler);
+app.use('/api/links', rememberMountPath, linksRouter);
+app.use('/api/links', rememberMountPath, statsRouter);
 
-// Must stay after every other single-segment route (/health, later /metrics),
+// Must stay after every other single-segment route (/health, /metrics),
 // because /:code matches any single path segment.
 app.use(redirectRouter);
 

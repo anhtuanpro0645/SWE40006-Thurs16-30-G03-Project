@@ -1,0 +1,90 @@
+# Deploys one commit to one server and checks it (issues #11 and #16).
+#
+# Used by the "deploy (staging)" and "deploy (production)" jobs in ci.yml. The calling job
+# picks the GitHub environment, so each server's host, key and host key come from its own
+# environment and nothing is shared between Staging and Production.
+#
+#   1. deploy/setup-ssh.sh     SSH with strict host key checking
+#   2. copy                    docker-compose.prod.yml and deploy.sh to /home/deploy/app
+#   3. deploy/deploy.sh <sha>  on the server: pull, start, wait until healthy
+#   4. deploy/smoke-test.sh    from the runner: /health must report <sha>
+#   5. the private key is removed from the runner, even when a step failed
+
+name: Deploy to server
+description: Deploy a commit to a server over SSH and smoke test it
+
+inputs:
+  environment-name:
+    description: Shown in the run summary, e.g. "Staging"
+    required: true
+  host:
+    description: Server address (secret)
+    required: true
+  user:
+    description: SSH user on the server
+    required: true
+  ssh-key:
+    description: Private key for that user (secret)
+    required: true
+  known-hosts:
+    description: The server's host key line (secret)
+    required: true
+  sha:
+    description: Full commit SHA of the images to deploy
+    required: true
+  app-dir:
+    description: Directory on the server that holds the compose file, deploy.sh and .env
+    default: /home/deploy/app
+
+runs:
+  using: composite
+  steps:
+    - name: Set up SSH
+      shell: bash
+      env:
+        SSH_HOST: ${{ inputs.host }}
+        SSH_USER: ${{ inputs.user }}
+        SSH_KEY: ${{ inputs.ssh-key }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+      run: bash deploy/setup-ssh.sh
+
+    - name: Copy the compose file and deploy script
+      shell: bash
+      env:
+        APP_DIR: ${{ inputs.app-dir }}
+      run: |
+        # shellcheck disable=SC2029 # APP_DIR is meant to expand on the runner
+        ssh server "mkdir -p '$APP_DIR'"
+        scp deploy/docker-compose.prod.yml deploy/deploy.sh "server:$APP_DIR/"
+        # Commits made on Windows lose the executable bit, so set it on the server
+        # shellcheck disable=SC2029 # APP_DIR is meant to expand on the runner
+        ssh server "chmod 755 '$APP_DIR/deploy.sh'"
+
+    - name: Run deploy.sh on the server
+      shell: bash
+      env:
+        APP_DIR: ${{ inputs.app-dir }}
+        DEPLOY_SHA: ${{ inputs.sha }}
+      run: |
+        # shellcheck disable=SC2029 # APP_DIR and the SHA are meant to expand on the runner
+        ssh server "bash '$APP_DIR/deploy.sh' '$DEPLOY_SHA'"
+
+    # Fails the job unless /health answers 200 with the SHA that was just deployed
+    - name: Smoke test /health
+      shell: bash
+      env:
+        SERVER_HOST: ${{ inputs.host }}
+        DEPLOY_SHA: ${{ inputs.sha }}
+        ENVIRONMENT_NAME: ${{ inputs.environment-name }}
+      run: |
+        bash deploy/smoke-test.sh "http://$SERVER_HOST" "$DEPLOY_SHA"
+        {
+          echo "### Deployed to $ENVIRONMENT_NAME"
+          echo
+          echo "\`$DEPLOY_SHA\` is running and \`/health\` reports the same SHA."
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Remove the SSH key
+      if: ${{ always() }}
+      shell: bash
+      run: rm -f ~/.ssh/deploy_key
