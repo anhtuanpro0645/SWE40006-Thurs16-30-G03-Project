@@ -12,14 +12,14 @@ Deck: `Sem2_Presentation_G03.pptx` (draft 1). Speaker notes in the deck match th
 | 2 | Acknowledgement of Country | Minh | 0:10 | 0:40 |
 | 3 | Overview | Minh | 1:00 | 1:40 |
 | 4 | Project Background and Problem Statement | Minh | 1:30 | 3:10 |
-| 5 | Project Scope and Objectives | Minh | 1:30 | 4:40 |
+| 5 | Project Scope and Objectives | Vinh | 1:30 | 4:40 |
 | 6 | Project Outcome/Deliverables | Tuan | 1:30 | 6:10 |
 | 7 | Design Concepts & Trade-offs | Duc | 2:30 | 8:40 |
 | 8 | Execution & Technical Challenges | Vinh | 2:00 | 10:40 |
 | 9 | Deployment Demonstration | Tuan, Minh, Duc | 4:00 | 14:40 |
 | 10 | Thank you | Minh | 0:20 | 15:00 |
 
-Speaking time: Minh about 6:30, Tuan about 3:00, Duc about 3:00, Vinh about 2:00.
+Speaking time: Minh about 5:00, Vinh about 3:30, Tuan about 3:00, Duc about 3:00.
 
 ## Before the session (checklist)
 
@@ -76,13 +76,13 @@ Speaking time: Minh about 6:30, Tuan about 3:00, Duc about 3:00, Vinh about 2:00
 >
 > Our pipeline answers each of those: automated builds and deployments, tests that gate every change, monitoring on Production, and versioned images so we can roll back.
 >
-> On the right you can see the four levels from the unit, and the ticks: we completed all four. The rest of the talk is how.
+> On the right you can see the four levels from the unit, and the ticks: we completed all four. The rest of the talk is how. Vinh will start with the scope and our targets.
 
 ## Slide 5: Project Scope and Objectives (Vinh, 1:30)
 
 **On screen:** the three containers, the environments table, the automation boundary, the four targets.
 
-> The application is a URL shortener. You paste a long link and get a short one. Every click on the short link is recorded, and each link has a statistics page with clicks per day, top referrers and top browsers.
+> Thanks Minh. The application is a URL shortener. You paste a long link and get a short one. Every click on the short link is recorded, and each link has a statistics page with clicks per day, top referrers and top browsers.
 >
 > It runs as three Docker containers: Nginx serving the Vue front end, a Node and Express API, and PostgreSQL. One Docker Compose file runs the same three containers on our laptops, on Staging and on Production. Only the environment file changes. Every image is tagged with the full commit SHA, never "latest", so we always know exactly what is running.
 >
