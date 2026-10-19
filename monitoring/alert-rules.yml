@@ -1,0 +1,21 @@
+groups:
+  - name: app-and-server
+    rules:
+      - alert: AppDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API is down"
+          description: "Prometheus has not been able to scrape the API for more than 1 minute."
+
+      - alert: HighCpu
+        expr: 100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU above 80%"
+          description: "Server CPU has been above 80% for more than 5 minutes."
+          
