@@ -138,6 +138,19 @@ test_current_sha_ignores_a_malformed_value() {
   teardown
 }
 
+# The action must not hide a failing current-sha.sh: with "set -e", a failing $(...) inside the
+# argument of echo does NOT stop the step, so the SHA has to be assigned on its own line first.
+test_action_does_not_hide_a_failing_current_sha() {
+  setup
+  : > "$WORK_DIR/out.log" # check prints this file when a check fails
+  local action="$DEPLOY_DIR/../.github/actions/deploy-to-server/action.yml"
+  check "the SHA is assigned before it is echoed" \
+    grep -qF 'sha="$(bash deploy/current-sha.sh)"' "$action"
+  check "echo does not wrap the command substitution" \
+    bash -c '! grep -qF "echo \"sha=\$(bash deploy/current-sha.sh)\"" "$1"' _ "$action"
+  teardown
+}
+
 # --- rollback.sh ------------------------------------------------------------
 
 test_rollback_rejects_bad_arguments() {
@@ -238,6 +251,9 @@ test_current_sha_uses_the_app_dir_variable
 test_current_sha_prints_nothing_on_a_new_server
 test_current_sha_fails_when_ssh_fails
 test_current_sha_ignores_a_malformed_value
+
+echo "deploy action"
+test_action_does_not_hide_a_failing_current_sha
 
 echo "rollback.sh"
 test_rollback_rejects_bad_arguments

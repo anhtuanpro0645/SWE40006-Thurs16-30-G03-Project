@@ -56,7 +56,10 @@ runs:
       shell: bash
       env:
         APP_DIR: ${{ inputs.app-dir }}
-      run: echo "sha=$(bash deploy/current-sha.sh)" >> "$GITHUB_OUTPUT"
+      run: |
+        # Assigned on its own line: a failing $(...) inside echo would not stop the step
+        sha="$(bash deploy/current-sha.sh)"
+        echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
     - name: Copy the compose file and deploy script
       shell: bash
