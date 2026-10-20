@@ -8,7 +8,8 @@
 #   2. copy                    docker-compose.prod.yml and deploy.sh to /home/deploy/app
 #   3. deploy/deploy.sh <sha>  on the server: pull, start, wait until healthy
 #   4. deploy/smoke-test.sh    from the runner: /health must report <sha>
-#   5. the private key is removed from the runner, even when a step failed
+#   5. if step 3 or 4 failed, deploy/rollback.sh puts the version that ran before back (#13)
+#   6. the private key is removed from the runner, even when a step failed
 
 name: Deploy to server
 description: Deploy a commit to a server over SSH and smoke test it
@@ -48,6 +49,14 @@ runs:
         KNOWN_HOSTS: ${{ inputs.known-hosts }}
       run: bash deploy/setup-ssh.sh
 
+    # Remembered before anything changes, so a failed deployment can go back to it
+    - name: Note the version that is running now
+      id: before
+      shell: bash
+      env:
+        APP_DIR: ${{ inputs.app-dir }}
+      run: echo "sha=$(bash deploy/current-sha.sh)" >> "$GITHUB_OUTPUT"
+
     - name: Copy the compose file and deploy script
       shell: bash
       env:
@@ -61,6 +70,7 @@ runs:
         ssh server "chmod 755 '$APP_DIR/deploy.sh'"
 
     - name: Run deploy.sh on the server
+      id: deploy
       shell: bash
       env:
         APP_DIR: ${{ inputs.app-dir }}
@@ -71,6 +81,7 @@ runs:
 
     # Fails the job unless /health answers 200 with the SHA that was just deployed
     - name: Smoke test /health
+      id: smoke
       shell: bash
       env:
         SERVER_HOST: ${{ inputs.host }}
@@ -83,6 +94,17 @@ runs:
           echo
           echo "\`$DEPLOY_SHA\` is running and \`/health\` reports the same SHA."
         } >> "$GITHUB_STEP_SUMMARY"
+
+    # The job still ends red, because the release failed, but the server is healthy again
+    - name: Roll back to the previous version
+      if: ${{ failure() && (steps.deploy.outcome == 'failure' || steps.smoke.outcome == 'failure') }}
+      shell: bash
+      env:
+        APP_DIR: ${{ inputs.app-dir }}
+        SERVER_HOST: ${{ inputs.host }}
+        PREVIOUS_SHA: ${{ steps.before.outputs.sha }}
+        FAILED_SHA: ${{ inputs.sha }}
+      run: bash deploy/rollback.sh "http://$SERVER_HOST" "$PREVIOUS_SHA" "$FAILED_SHA"
 
     - name: Remove the SSH key
       if: ${{ always() }}
