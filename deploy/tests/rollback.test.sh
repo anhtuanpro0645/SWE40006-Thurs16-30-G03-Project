@@ -91,6 +91,7 @@ ssh_contains() { grep -q -- "$1" "$SSH_CALLS"; }
 ssh_not_called() { [[ ! -s "$SSH_CALLS" ]]; }
 smoke_contains() { grep -q -- "$1" "$SMOKE_CALLS"; }
 smoke_not_called() { [[ ! -s "$SMOKE_CALLS" ]]; }
+file_lacks_line() { ! grep -qF -- "$1" "$2"; }
 summary_contains() { grep -q -- "$1" "$SUMMARY"; }
 
 # --- current-sha.sh ---------------------------------------------------------
@@ -144,10 +145,12 @@ test_action_does_not_hide_a_failing_current_sha() {
   setup
   : > "$WORK_DIR/out.log" # check prints this file when a check fails
   local action="$DEPLOY_DIR/../.github/actions/deploy-to-server/action.yml"
-  check "the SHA is assigned before it is echoed" \
-    grep -qF 'sha="$(bash deploy/current-sha.sh)"' "$action"
-  check "echo does not wrap the command substitution" \
-    bash -c '! grep -qF "echo \"sha=\$(bash deploy/current-sha.sh)\"" "$1"' _ "$action"
+  # shellcheck disable=SC2016 # these are literal lines of the YAML file, not expansions
+  local good_line='sha="$(bash deploy/current-sha.sh)"'
+  # shellcheck disable=SC2016
+  local bad_line='echo "sha=$(bash deploy/current-sha.sh)"'
+  check "the SHA is assigned before it is echoed" grep -qF -- "$good_line" "$action"
+  check "echo does not wrap the command substitution" file_lacks_line "$bad_line" "$action"
   teardown
 }
 
