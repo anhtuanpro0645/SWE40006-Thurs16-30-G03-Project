@@ -7,8 +7,8 @@
 # rollback.sh knows which version to go back to if the new one fails.
 #
 # A server that has never been deployed has no image.env. That is not an error: the
-# script prints nothing and exits 0. APP_DIR (default /home/deploy/app) is the folder
-# on the server.
+# script prints nothing and exits 0. A real SSH failure is an error, so it is never
+# mistaken for a new server. APP_DIR (default /home/deploy/app) is the folder on the server.
 
 set -euo pipefail
 
@@ -16,8 +16,10 @@ readonly APP_DIR="${APP_DIR:-/home/deploy/app}"
 
 main() {
   local content tag
+  # "|| true" runs on the server, so only a missing file is ignored; ssh itself failing is not
   # shellcheck disable=SC2029 # APP_DIR is meant to expand on the runner
-  content="$(ssh server "cat '$APP_DIR/image.env'" 2>/dev/null)" || return 0
+  content="$(ssh server "cat '$APP_DIR/image.env' 2>/dev/null || true")" \
+    || { echo "current-sha: could not read image.env: the SSH connection failed" >&2; exit 1; }
   tag="$(sed -n 's/^IMAGE_TAG=//p' <<< "$content" | head -n 1 | tr -d '\r')"
   if [[ "$tag" =~ ^[0-9a-f]{40}$ ]]; then
     echo "$tag"

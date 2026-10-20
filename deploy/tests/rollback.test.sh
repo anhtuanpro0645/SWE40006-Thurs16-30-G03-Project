@@ -32,9 +32,9 @@ setup() {
   cat > "$WORK_DIR/bin/ssh" <<'FAKE'
 #!/usr/bin/env bash
 echo "$*" >> "$FAKE_SSH_CALLS"
+[[ "${FAKE_SSH_DOWN:-}" == "1" ]] && exit 255
 case "$*" in
   *"cat "*)
-    [[ "${FAKE_CAT_FAILS:-}" == "1" ]] && exit 1
     printf '%s' "${FAKE_IMAGE_ENV:-}"
     ;;
   *deploy.sh*)
@@ -64,7 +64,7 @@ run_script() {
   local script="$1"
   shift
   PATH="$WORK_DIR/bin:$PATH" FAKE_SSH_CALLS="$SSH_CALLS" FAKE_SMOKE_CALLS="$SMOKE_CALLS" \
-    FAKE_IMAGE_ENV="${FAKE_IMAGE_ENV:-}" FAKE_CAT_FAILS="${FAKE_CAT_FAILS:-}" \
+    FAKE_IMAGE_ENV="${FAKE_IMAGE_ENV:-}" FAKE_SSH_DOWN="${FAKE_SSH_DOWN:-}" \
     FAKE_DEPLOY_FAILS="${FAKE_DEPLOY_FAILS:-}" FAKE_SMOKE_FAILS="${FAKE_SMOKE_FAILS:-}" \
     GITHUB_STEP_SUMMARY="$SUMMARY" \
     bash "$SCRIPTS/$script" "$@" > "$WORK_DIR/out.log" 2>&1
@@ -113,9 +113,17 @@ test_current_sha_uses_the_app_dir_variable() {
 
 test_current_sha_prints_nothing_on_a_new_server() {
   setup
-  FAKE_CAT_FAILS=1 check "succeeds when image.env does not exist yet" run_script current-sha.sh
-  FAKE_CAT_FAILS=1 run_script current-sha.sh
+  check "succeeds when image.env does not exist yet" run_script current-sha.sh
+  run_script current-sha.sh
   check "prints nothing" output_is ""
+  check "only a missing file is ignored on the server" ssh_contains "|| true"
+  teardown
+}
+
+test_current_sha_fails_when_ssh_fails() {
+  setup
+  FAKE_SSH_DOWN=1 check "an SSH failure exits non-zero" script_fails current-sha.sh
+  check "error says the server could not be reached" output_contains "could not read"
   teardown
 }
 
@@ -153,6 +161,24 @@ test_rollback_redeploys_the_previous_commit() {
   check "output says which commit is back" output_contains "rolled back"
   check "run summary names both commits" summary_contains "$SHA_NEW"
   check "run summary names the restored commit" summary_contains "$SHA_OLD"
+  teardown
+}
+
+test_rollback_restores_the_previous_compose_file() {
+  setup
+  run_script rollback.sh "$BASE_URL" "$SHA_OLD" "$SHA_NEW"
+  check "the saved compose file is copied back" \
+    ssh_contains "docker-compose.prod.yml.previous' '/home/deploy/app/docker-compose.prod.yml'"
+  check "the copy only happens if a saved file exists" ssh_contains "if \[ -f '/home/deploy/app/docker-compose.prod.yml.previous' \]"
+  check "restore and deploy.sh run in one SSH call" ssh_contains "fi && bash '/home/deploy/app/deploy.sh' '$SHA_OLD'"
+  teardown
+}
+
+test_rollback_reports_how_long_it_took() {
+  setup
+  run_script rollback.sh "$BASE_URL" "$SHA_OLD" "$SHA_NEW"
+  check "output gives the duration" output_contains "rolled back to $SHA_OLD in [0-9]* seconds"
+  check "run summary gives the duration" summary_contains "seconds"
   teardown
 }
 
@@ -210,11 +236,14 @@ echo "current-sha.sh"
 test_current_sha_prints_the_running_commit
 test_current_sha_uses_the_app_dir_variable
 test_current_sha_prints_nothing_on_a_new_server
+test_current_sha_fails_when_ssh_fails
 test_current_sha_ignores_a_malformed_value
 
 echo "rollback.sh"
 test_rollback_rejects_bad_arguments
 test_rollback_redeploys_the_previous_commit
+test_rollback_restores_the_previous_compose_file
+test_rollback_reports_how_long_it_took
 test_rollback_uses_the_app_dir_variable
 test_rollback_skips_when_there_is_nothing_to_go_back_to
 test_rollback_skips_when_previous_is_the_failed_commit

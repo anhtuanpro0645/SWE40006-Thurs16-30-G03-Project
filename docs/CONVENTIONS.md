@@ -84,9 +84,13 @@ chosen version is unhealthy, and the version that ran before is put back.
 Both deploy jobs use the composite action `.github/actions/deploy-to-server`
 (`setup-ssh.sh`, note the running version, copy files, `deploy.sh`, `smoke-test.sh`,
 `rollback.sh` if one of those two failed, remove the key), so Staging and Production always
-go through the same steps. Runs on `main` queue one after another, so
+go through the same steps. Deployments to one server never run at the same time (the
+`deploy-staging`, `deploy-production` concurrency groups, shared with the manual rollback), so
 **a run waiting for Production approval holds the next merges** until it is approved or
-rejected: approve or reject promptly.
+rejected: approve or reject promptly. Limitation: a group keeps only one waiting run, so a
+newer deployment cancels an older one that is still waiting (GitHub also offers `queue: max`
+to keep all of them; not used yet because it has not been tried on this repo). Do not start a
+manual rollback while a CI deployment to the same server is waiting, or one of them is cancelled.
 
 ## 4. Ports
 
@@ -181,8 +185,13 @@ still passes.
 **Rollback (#13).** Before deploying, the deploy action reads `image.env` on the server
 (`deploy/current-sha.sh`). If `deploy.sh` or the smoke test then fails, the action runs
 `deploy/rollback.sh`, which redeploys that earlier SHA and checks `/health` reports it. The
-job stays red, because the release failed, but the server is healthy again. Nothing is
-rolled back on the first deployment to a server (there is no earlier version). A rollback
+job stays red, because the release failed, but the server is healthy again. The deploy job
+keeps the compose file that was on the server as `docker-compose.prod.yml.previous` before it
+copies the new one, and the rollback puts it back first, so a bad compose change does not
+break the rollback too. Nothing is rolled back on the first deployment to a server (there is
+no earlier version). The rollback starts only after the failed deployment gives up: a start
+that never becomes healthy waits up to 180 seconds first, so allow about 4 to 5 minutes in the
+worst case; `rollback.sh` prints how long the rollback itself took. A rollback
 is temporary: the next merge to `main` deploys the newest commit again, so revert a bad
 commit on `main` to keep the old version running.
 

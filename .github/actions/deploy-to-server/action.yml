@@ -6,6 +6,7 @@
 #
 #   1. deploy/setup-ssh.sh     SSH with strict host key checking
 #   2. copy                    docker-compose.prod.yml and deploy.sh to /home/deploy/app
+#                              (the old compose file is kept as docker-compose.prod.yml.previous)
 #   3. deploy/deploy.sh <sha>  on the server: pull, start, wait until healthy
 #   4. deploy/smoke-test.sh    from the runner: /health must report <sha>
 #   5. if step 3 or 4 failed, deploy/rollback.sh puts the version that ran before back (#13)
@@ -64,6 +65,9 @@ runs:
       run: |
         # shellcheck disable=SC2029 # APP_DIR is meant to expand on the runner
         ssh server "mkdir -p '$APP_DIR'"
+        # Keep the compose file that matches the running version, so a rollback can use it
+        # shellcheck disable=SC2029 # APP_DIR is meant to expand on the runner
+        ssh server "if [ -f '$APP_DIR/docker-compose.prod.yml' ]; then cp -f '$APP_DIR/docker-compose.prod.yml' '$APP_DIR/docker-compose.prod.yml.previous'; fi"
         scp deploy/docker-compose.prod.yml deploy/deploy.sh "server:$APP_DIR/"
         # Commits made on Windows lose the executable bit, so set it on the server
         # shellcheck disable=SC2029 # APP_DIR is meant to expand on the runner

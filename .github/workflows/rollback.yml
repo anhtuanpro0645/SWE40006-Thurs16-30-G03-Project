@@ -30,10 +30,24 @@ permissions:
   contents: read
 
 jobs:
+  # Fails loudly when started from another branch, before any approval is requested
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Only main may reach a server
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF_NAME" != "main" ]]; then
+            echo "::error::Start this workflow from the main branch (it was started from $REF_NAME)."
+            exit 1
+          fi
+
   rollback:
     name: rollback (${{ inputs.environment }})
-    # Only the code on main may reach a server
-    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: guard
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: ${{ inputs.environment }}
@@ -63,7 +77,7 @@ jobs:
       - name: Roll back
         uses: ./.github/actions/deploy-to-server
         with:
-          environment-name: ${{ inputs.environment }}
+          environment-name: ${{ env.IS_PRODUCTION == 'true' && 'Production' || 'Staging' }}
           host: ${{ env.IS_PRODUCTION == 'true' && secrets.PROD_HOST || secrets.STAGING_HOST }}
           user: ${{ env.IS_PRODUCTION == 'true' && vars.PROD_USER || vars.STAGING_USER }}
           ssh-key: ${{ env.IS_PRODUCTION == 'true' && secrets.PROD_SSH_KEY || secrets.STAGING_SSH_KEY }}

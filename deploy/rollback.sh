@@ -5,7 +5,10 @@
 # Runs on the CI runner after deploy.sh or smoke-test.sh failed, and by the manual
 # rollback workflow through the same deploy action. It runs deploy.sh on the server with
 # the previous SHA, then smoke-test.sh must see that SHA on /health. The images of the
-# previous version are pulled again if they were removed from the server.
+# previous version are pulled again if they were removed from the server. The deploy job
+# saves the compose file that was on the server as docker-compose.prod.yml.previous before
+# it copies the new one, and this script puts it back first, so a bad compose change cannot
+# also break the rollback.
 #
 # There is nothing to do (exit 0, with a notice) when no previous version is known,
 # which happens on the first deployment to a server, or when the previous version is the
@@ -19,6 +22,7 @@ set -euo pipefail
 readonly APP_DIR="${APP_DIR:-/home/deploy/app}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
+readonly COMPOSE_FILE="docker-compose.prod.yml"
 readonly SHA_PATTERN='^[0-9a-f]{40}$'
 
 fail() {
@@ -55,9 +59,9 @@ main() {
     return 0
   fi
 
-  echo "rollback: $failed_sha failed, putting $previous_sha back"
+  echo "rollback: $failed_sha failed, putting $previous_sha back ($(date -u +%H:%M:%S) UTC)"
   # shellcheck disable=SC2029 # APP_DIR and the SHA are meant to expand on the runner
-  if ! ssh server "bash '$APP_DIR/deploy.sh' '$previous_sha'"; then
+  if ! ssh server "if [ -f '$APP_DIR/$COMPOSE_FILE.previous' ]; then cp -f '$APP_DIR/$COMPOSE_FILE.previous' '$APP_DIR/$COMPOSE_FILE'; fi && bash '$APP_DIR/deploy.sh' '$previous_sha'"; then
     summary "### Rollback failed" "" \
       "\`$failed_sha\` failed, and redeploying \`$previous_sha\` failed too. Check the server by hand."
     fail "rollback failed: could not redeploy $previous_sha"
@@ -68,9 +72,9 @@ main() {
     fail "rollback failed: /health does not report $previous_sha"
   fi
 
-  echo "rollback: rolled back to $previous_sha"
+  echo "rollback: rolled back to $previous_sha in $SECONDS seconds"
   summary "### Rolled back" "" \
-    "\`$failed_sha\` failed its health check, so \`$previous_sha\` was deployed again and \`/health\` reports it."
+    "\`$failed_sha\` failed its health check, so \`$previous_sha\` was deployed again and \`/health\` reports it. The rollback took $SECONDS seconds."
 }
 
 main "$@"
