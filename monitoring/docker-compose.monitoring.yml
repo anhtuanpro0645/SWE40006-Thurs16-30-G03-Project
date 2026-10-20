@@ -38,6 +38,7 @@ services:
       - --path.rootfs=/host
     volumes:
       - /:/host:ro,rslave
+    mem_limit: 64m
     logging: *default-logging
 
   cadvisor:
@@ -61,7 +62,7 @@ services:
       - monitoring
 
   grafana:
-    image: grafana/grafana:11.1.0
+    image: grafana/grafana:11.1.11
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: admin
