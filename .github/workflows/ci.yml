@@ -1,4 +1,4 @@
-# CI for every pull request and every push to main (issues #6, #7, #10, #11, #12 and #16).
+# CI for every pull request and every push to main (issues #6, #7, #10, #11, #12, #13 and #16).
 #
 #   backend ─┐
 #            ├─> images (api, web) ─┐
@@ -12,7 +12,8 @@
 #           Trivy (fails on fixable CRITICAL vulnerabilities) and, on main only, push the
 #           exact image that was scanned to GHCR
 # deploy scripts: shellcheck and tests for the scripts in deploy/, so a broken deploy script
-#           is caught in the pull request instead of on the server
+#           is caught in the pull request instead of on the server. Both deploy jobs also put the
+#           previous version back when the new one fails (deploy/rollback.sh, issue #13)
 # build:    final gate. The protect-main ruleset requires a check called "build", so this
 #           job only passes when every job above passed. Keep its name if you rename others.
 # deploy (staging): after every merge, runs deploy/deploy.sh on Staging over SSH with the
@@ -262,6 +263,9 @@ jobs:
 
       - name: Test setup-ssh.sh
         run: bash deploy/tests/setup-ssh.test.sh
+
+      - name: Test current-sha.sh and rollback.sh
+        run: bash deploy/tests/rollback.test.sh
 
   build:
     name: build

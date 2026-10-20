@@ -1,0 +1,85 @@
+# Manual rollback (issue #13): redeploys any commit whose images are in GHCR to Staging
+# or Production. Start it from the Actions tab: Manual rollback, Run workflow.
+#
+# It uses the same deploy action as the CI deploy jobs, so it pulls the images, waits for
+# the containers to be healthy and checks that /health reports the chosen commit. If that
+# fails, the action puts back the version that was running before.
+#
+# Production still needs the reviewer approval of the "production" environment. A later
+# merge to main deploys the newest commit again, so to keep an old version running,
+# revert the bad commit on main instead.
+
+name: Manual rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Server to roll back
+        type: choice
+        options:
+          - staging
+          - production
+        required: true
+      sha:
+        description: Full 40-character commit SHA to deploy (see the run list or the image tags in GHCR)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Fails loudly when started from another branch, before any approval is requested
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Only main may reach a server
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF_NAME" != "main" ]]; then
+            echo "::error::Start this workflow from the main branch (it was started from $REF_NAME)."
+            exit 1
+          fi
+
+  rollback:
+    name: rollback (${{ inputs.environment }})
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.environment }}
+    # Shares the lock of the CI deploy jobs: never two deployments to one server at once
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+
+    env:
+      SMOKE_TEST_ATTEMPTS: 12
+      SMOKE_TEST_DELAY_SECONDS: 5
+      IS_PRODUCTION: ${{ inputs.environment == 'production' }}
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the commit SHA
+        env:
+          TARGET_SHA: ${{ inputs.sha }}
+        run: |
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The commit SHA must be 40 lower-case hex characters (no spaces)."
+            exit 1
+          fi
+
+      - name: Roll back
+        uses: ./.github/actions/deploy-to-server
+        with:
+          environment-name: ${{ env.IS_PRODUCTION == 'true' && 'Production' || 'Staging' }}
+          host: ${{ env.IS_PRODUCTION == 'true' && secrets.PROD_HOST || secrets.STAGING_HOST }}
+          user: ${{ env.IS_PRODUCTION == 'true' && vars.PROD_USER || vars.STAGING_USER }}
+          ssh-key: ${{ env.IS_PRODUCTION == 'true' && secrets.PROD_SSH_KEY || secrets.STAGING_SSH_KEY }}
+          known-hosts: ${{ env.IS_PRODUCTION == 'true' && secrets.PROD_KNOWN_HOSTS || secrets.STAGING_KNOWN_HOSTS }}
+          sha: ${{ inputs.sha }}
