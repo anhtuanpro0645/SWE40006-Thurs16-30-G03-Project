@@ -76,11 +76,21 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and every push to `ma
 | `e2e` | `main` only, after `deploy (staging)`: runs the Playwright tests in `tests/e2e/` against Staging; uploads the `playwright-report` artifact |
 | `deploy (production)` | `main` only, after `e2e`: waits for a reviewer to approve, then deploys the same commit to Production and runs the smoke test |
 
+Manual rollback (`.github/workflows/rollback.yml`, Actions tab, "Manual rollback", Run
+workflow): pick `staging` or `production` and paste the full SHA of any commit whose images
+are in GHCR. Production still waits for the reviewer's approval. The run is red if the
+chosen version is unhealthy, and the version that ran before is put back.
+
 Both deploy jobs use the composite action `.github/actions/deploy-to-server`
-(`setup-ssh.sh`, copy files, `deploy.sh`, `smoke-test.sh`, remove the key), so Staging and
-Production always go through the same steps. Runs on `main` queue one after another, so
+(`setup-ssh.sh`, note the running version, copy files, `deploy.sh`, `smoke-test.sh`,
+`rollback.sh` if one of those two failed, remove the key), so Staging and Production always
+go through the same steps. Deployments to one server never run at the same time (the
+`deploy-staging`, `deploy-production` concurrency groups, shared with the manual rollback), so
 **a run waiting for Production approval holds the next merges** until it is approved or
-rejected: approve or reject promptly.
+rejected: approve or reject promptly. Limitation: a group keeps only one waiting run, so a
+newer deployment cancels an older one that is still waiting (GitHub also offers `queue: max`
+to keep all of them; not used yet because it has not been tried on this repo). Do not start a
+manual rollback while a CI deployment to the same server is waiting, or one of them is cancelled.
 
 ## 4. Ports
 
@@ -168,9 +178,22 @@ which fails if a container does not become healthy within 180 seconds. A missing
 `.env` stops the deployment with an error; nothing falls back to a default secret.
 
 If the start fails, `image.env` already holds the new SHA (the containers were being
-replaced) and the version that ran before is in `image.env.previous`. Rollback (#13) redeploys
-that one: `./deploy.sh "$(cut -d= -f2 image.env.previous)"`. Removing old images afterwards
-is best effort: if it fails, `deploy.sh` prints a warning but the deployment still passes.
+replaced) and the version that ran before is in `image.env.previous`. Removing old images
+afterwards is best effort: if it fails, `deploy.sh` prints a warning but the deployment
+still passes.
+
+**Rollback (#13).** Before deploying, the deploy action reads `image.env` on the server
+(`deploy/current-sha.sh`). If `deploy.sh` or the smoke test then fails, the action runs
+`deploy/rollback.sh`, which redeploys that earlier SHA and checks `/health` reports it. The
+job stays red, because the release failed, but the server is healthy again. The deploy job
+keeps the compose file that was on the server as `docker-compose.prod.yml.previous` before it
+copies the new one, and the rollback puts it back first, so a bad compose change does not
+break the rollback too. Nothing is rolled back on the first deployment to a server (there is
+no earlier version). The rollback starts only after the failed deployment gives up: a start
+that never becomes healthy waits up to 180 seconds first, so allow about 4 to 5 minutes in the
+worst case; `rollback.sh` prints how long the rollback itself took. A rollback
+is temporary: the next merge to `main` deploys the newest commit again, so revert a bad
+commit on `main` to keep the old version running.
 
 After `deploy.sh`, the deploy job runs `deploy/smoke-test.sh http://<server> <SHA>` from the
 runner. It passes only when `/health` answers 200 with `version` equal to that SHA (12 tries,
@@ -185,6 +208,7 @@ To check or redeploy by hand on a server:
 cd /home/deploy/app
 cat image.env                       # which commit is running
 ./deploy.sh <full commit SHA>       # deploy a commit whose images are in GHCR
+cat image.env.previous              # the version that ran before, to roll back by hand
 docker compose --env-file .env --env-file image.env -f docker-compose.prod.yml ps
 ```
 
