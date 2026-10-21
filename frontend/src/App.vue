@@ -70,6 +70,7 @@ async function copyShortUrl() {
     <header>
       <h1>G03 Link Shortener</h1>
       <hr>
+      <hr>
       <p class="tagline">
         Paste a long link, get a short one.
       </p>
