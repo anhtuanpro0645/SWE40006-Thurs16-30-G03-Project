@@ -25,7 +25,7 @@ async function applySchemaWithRetry() {
 
 try {
   await applySchemaWithRetry();
-} catch (err) {
+} catch {
   console.error('Could not prepare the database, exiting');
   process.exit(1);
 }
