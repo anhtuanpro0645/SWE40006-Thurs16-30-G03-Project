@@ -30,6 +30,10 @@ try {
   process.exit(1);
 }
 
+// Deliberately broken build to test the automatic rollback (#13). Reverted right after.
+console.error('Deliberately broken build for #13');
+process.exit(1);
+
 const server = app.listen(config.port, () => {
   console.log(
     `API listening on port ${config.port} (env: ${config.nodeEnv}, version: ${config.gitSha})`,
