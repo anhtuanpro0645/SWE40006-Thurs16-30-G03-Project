@@ -25,10 +25,14 @@ async function applySchemaWithRetry() {
 
 try {
   await applySchemaWithRetry();
-} catch {
+} catch (err) {
   console.error('Could not prepare the database, exiting');
   process.exit(1);
 }
+
+// Deliberately broken build to test the automatic rollback (#13). Reverted right after.
+console.error('Deliberately broken build for #13');
+process.exit(1);
 
 const server = app.listen(config.port, () => {
   console.log(
